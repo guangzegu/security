@@ -28,14 +28,20 @@ import org.bouncycastle.crypto.CryptoServicesRegistrar;
 
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.security.ssl.OpenSearchSecuritySSLPlugin;
 import org.opensearch.security.ssl.config.CertType;
 
 import io.netty.handler.ssl.ClientAuth;
+import io.netty.handler.ssl.OpenSsl;
 
 public final class SSLConfigConstants {
     /**
      * Global configurations
      */
+    /** OpenSSL 1.1.1-beta9 hex version (as reported by {@link OpenSsl#version()}). */
+    public static final Long OPENSSL_1_1_1_BETA_9 = 0x10101009L;
+    /** Whether OpenSSL is structurally allowed AND the native lib actually loaded. */
+    public static final boolean OPENSSL_AVAILABLE = OpenSearchSecuritySSLPlugin.OPENSSL_SUPPORTED && OpenSsl.isAvailable();
     public static final String DEFAULT_STORE_PASSWORD = "changeit"; // #16
     public static final String JDK_TLS_REJECT_CLIENT_INITIATED_RENEGOTIATION = "jdk.tls.rejectClientInitiatedRenegotiation";
     public static final String[] ALLOWED_SSL_PROTOCOLS = { "TLSv1.3", "TLSv1.2", "TLSv1.1" };
@@ -70,6 +76,7 @@ public final class SSLConfigConstants {
     public static final String ENABLED_PROTOCOLS = "enabled_protocols";
     public static final String ENABLED_CIPHERS = "enabled_ciphers";
     public static final String PEM_KEY_PASSWORD = "pemkey_password";
+    public static final String ENABLE_OPENSSL_IF_AVAILABLE = "enable_openssl_if_available";
 
     /**
      * HTTP transport security settings
@@ -83,6 +90,10 @@ public final class SSLConfigConstants {
     public static final String SECURITY_SSL_HTTP_ENABLED = SSL_HTTP_PREFIX + ENABLED;
     public static final String SECURITY_SSL_HTTP_ENABLED_CIPHERS = SSL_HTTP_PREFIX + ENABLED_CIPHERS;
     public static final String SECURITY_SSL_HTTP_ENABLED_PROTOCOLS = SSL_HTTP_PREFIX + ENABLED_PROTOCOLS;
+
+    // http allowed openssl protocols
+    public static final String[] ALLOWED_OPENSSL_HTTP_PROTOCOLS = ALLOWED_SSL_PROTOCOLS;
+    public static final String[] ALLOWED_OPENSSL_HTTP_PROTOCOLS_PRIOR_OPENSSL_1_1_1_BETA_9 = { "TLSv1.2", "TLSv1.1", "TLSv1" };
 
     // http keystore settings
     public static final String SECURITY_SSL_HTTP_KEYSTORE_TYPE = SSL_HTTP_PREFIX + KEYSTORE_TYPE;
@@ -99,6 +110,7 @@ public final class SSLConfigConstants {
     public static final String SECURITY_SSL_HTTP_ENFORCE_CERT_RELOAD_DN_VERIFICATION = SSL_HTTP_PREFIX
         + ENFORCE_CERT_RELOAD_DN_VERIFICATION;
     public static final String SECURITY_SSL_HTTP_PEMTRUSTEDCAS_FILEPATH = SSL_HTTP_PREFIX + PEM_TRUSTED_CAS_FILEPATH;
+    public static final String SECURITY_SSL_HTTP_ENABLE_OPENSSL_IF_AVAILABLE = SSL_HTTP_PREFIX + ENABLE_OPENSSL_IF_AVAILABLE;
 
     // http cert revocation list settings
     public static final String SECURITY_SSL_HTTP_CRL_FILE = SSL_HTTP_CRL_PREFIX + "file_path";
@@ -194,6 +206,10 @@ public final class SSLConfigConstants {
     public static final String SECURITY_SSL_TRANSPORT_ENABLED_CIPHERS = SSL_TRANSPORT_PREFIX + ENABLED_CIPHERS;
     public static final String SECURITY_SSL_TRANSPORT_ENABLED_PROTOCOLS = SSL_TRANSPORT_PREFIX + ENABLED_PROTOCOLS;
 
+    // transport allowed openssl protocols
+    public static final String[] ALLOWED_OPENSSL_TRANSPORT_PROTOCOLS = ALLOWED_SSL_PROTOCOLS;
+    public static final String[] ALLOWED_OPENSSL_TRANSPORT_PROTOCOLS_PRIOR_OPENSSL_1_1_1_BETA_9 = { "TLSv1.2", "TLSv1.1" };
+
     // transport keystore settings
     public static final String SECURITY_SSL_TRANSPORT_KEYSTORE_TYPE = SSL_TRANSPORT_PREFIX + KEYSTORE_TYPE;
     public static final String SECURITY_SSL_TRANSPORT_KEYSTORE_FILEPATH = SSL_TRANSPORT_PREFIX + KEYSTORE_FILEPATH;
@@ -212,6 +228,7 @@ public final class SSLConfigConstants {
     public static final String SECURITY_SSL_TRANSPORT_ENFORCE_CERT_RELOAD_DN_VERIFICATION = SSL_TRANSPORT_PREFIX
         + ENFORCE_CERT_RELOAD_DN_VERIFICATION;
     public static final String SECURITY_SSL_TRANSPORT_PEMTRUSTEDCAS_FILEPATH = SSL_TRANSPORT_PREFIX + PEM_TRUSTED_CAS_FILEPATH;
+    public static final String SECURITY_SSL_TRANSPORT_ENABLE_OPENSSL_IF_AVAILABLE = SSL_TRANSPORT_PREFIX + ENABLE_OPENSSL_IF_AVAILABLE;
 
     /*
     On the transport layer we enforce ClientAuth.REQUIRE.

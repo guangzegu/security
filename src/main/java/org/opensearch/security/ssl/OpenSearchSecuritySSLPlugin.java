@@ -39,6 +39,7 @@ import org.opensearch.Version;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.node.DiscoveryNodes;
 import org.opensearch.cluster.service.ClusterService;
+import org.opensearch.common.Booleans;
 import org.opensearch.common.network.NetworkModule;
 import org.opensearch.common.network.NetworkService;
 import org.opensearch.common.settings.ClusterSettings;
@@ -123,6 +124,25 @@ public class OpenSearchSecuritySSLPlugin extends Plugin implements SystemIndexPl
         Property.Filtered,
         Property.Deprecated
     );
+
+    /**
+     * If true, Netty will use its default allocator (the standard pooled byte-buf allocator).
+     * Required by netty-tcnative; the unsafe-disabled allocator forces the JDK SSL engine.
+     */
+    public static final boolean USE_NETTY_DEFAULT_ALLOCATOR = Booleans.parseBoolean(
+        System.getProperty("opensearch.unsafe.use_netty_default_allocator"),
+        false
+    );
+
+    /**
+     * Whether native OpenSSL (via netty-tcnative) is structurally supported in this JVM.
+     * <p>
+     * Historical note: prior to PR #5220 this constant was {@code (PlatformDependent.javaVersion() < 12) && USE_NETTY_DEFAULT_ALLOCATOR},
+     * which made OpenSSL effectively unusable on JDK 12+. Modern netty-tcnative releases
+     * support newer JDKs, so the JDK version restriction has been dropped — only the
+     * default-allocator requirement remains.
+     */
+    public static final boolean OPENSSL_SUPPORTED = USE_NETTY_DEFAULT_ALLOCATOR;
 
     protected final Logger log = LogManager.getLogger(this.getClass());
     public static final String CLIENT_TYPE = "client.type";
@@ -610,6 +630,22 @@ public class OpenSearchSecuritySSLPlugin extends Plugin implements SystemIndexPl
             Setting.boolSetting(
                 SSLConfigConstants.SECURITY_SSL_TRANSPORT_ENFORCE_CERT_RELOAD_DN_VERIFICATION,
                 true,
+                Property.NodeScope,
+                Property.Filtered
+            )
+        );
+        settings.add(
+            Setting.boolSetting(
+                SSLConfigConstants.SECURITY_SSL_HTTP_ENABLE_OPENSSL_IF_AVAILABLE,
+                OPENSSL_SUPPORTED,
+                Property.NodeScope,
+                Property.Filtered
+            )
+        );
+        settings.add(
+            Setting.boolSetting(
+                SSLConfigConstants.SECURITY_SSL_TRANSPORT_ENABLE_OPENSSL_IF_AVAILABLE,
+                OPENSSL_SUPPORTED,
                 Property.NodeScope,
                 Property.Filtered
             )

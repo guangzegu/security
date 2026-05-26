@@ -22,19 +22,29 @@ import javax.net.ssl.SSLContext;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import org.bouncycastle.crypto.CryptoServicesRegistrar;
+
 import org.opensearch.OpenSearchException;
 import org.opensearch.OpenSearchSecurityException;
 import org.opensearch.common.settings.Settings;
 
 import io.netty.handler.ssl.ClientAuth;
+import io.netty.handler.ssl.OpenSsl;
 import io.netty.handler.ssl.SslProvider;
 
+import static org.opensearch.security.ssl.util.SSLConfigConstants.ALLOWED_OPENSSL_HTTP_PROTOCOLS;
+import static org.opensearch.security.ssl.util.SSLConfigConstants.ALLOWED_OPENSSL_HTTP_PROTOCOLS_PRIOR_OPENSSL_1_1_1_BETA_9;
+import static org.opensearch.security.ssl.util.SSLConfigConstants.ALLOWED_OPENSSL_TRANSPORT_PROTOCOLS;
+import static org.opensearch.security.ssl.util.SSLConfigConstants.ALLOWED_OPENSSL_TRANSPORT_PROTOCOLS_PRIOR_OPENSSL_1_1_1_BETA_9;
 import static org.opensearch.security.ssl.util.SSLConfigConstants.ALLOWED_SSL_CIPHERS;
 import static org.opensearch.security.ssl.util.SSLConfigConstants.ALLOWED_SSL_PROTOCOLS;
 import static org.opensearch.security.ssl.util.SSLConfigConstants.CLIENT_AUTH_MODE;
+import static org.opensearch.security.ssl.util.SSLConfigConstants.ENABLE_OPENSSL_IF_AVAILABLE;
 import static org.opensearch.security.ssl.util.SSLConfigConstants.ENABLED_CIPHERS;
 import static org.opensearch.security.ssl.util.SSLConfigConstants.ENABLED_PROTOCOLS;
 import static org.opensearch.security.ssl.util.SSLConfigConstants.ENFORCE_CERT_RELOAD_DN_VERIFICATION;
+import static org.opensearch.security.ssl.util.SSLConfigConstants.OPENSSL_1_1_1_BETA_9;
+import static org.opensearch.security.ssl.util.SSLConfigConstants.OPENSSL_AVAILABLE;
 import static org.opensearch.security.ssl.util.SSLConfigConstants.SECURITY_SSL_TRANSPORT_CLIENTAUTH_MODE_DEFAULT;
 
 public class SslParameters {
@@ -112,6 +122,19 @@ public class SslParameters {
         }
 
         private SslProvider provider() {
+            final boolean useOpenSslIfAvailable = sslConfigSettings.getAsBoolean(ENABLE_OPENSSL_IF_AVAILABLE, OPENSSL_AVAILABLE);
+            if (OPENSSL_AVAILABLE && useOpenSslIfAvailable) {
+                if (CryptoServicesRegistrar.isInApprovedOnlyMode()) {
+                    LOGGER.warn(
+                        "Native OpenSSL was requested for {} layer but the JVM is running in FIPS approved-only mode; "
+                            + "falling back to JDK SSL to preserve FIPS compliance.",
+                        certType
+                    );
+                    return SslProvider.JDK;
+                }
+                LOGGER.info("Using native OpenSSL provider for {} layer: {}", certType, OpenSsl.versionString());
+                return SslProvider.OPENSSL;
+            }
             return SslProvider.JDK;
         }
 
@@ -119,8 +142,20 @@ public class SslParameters {
             return settings.getAsBoolean(ENFORCE_CERT_RELOAD_DN_VERIFICATION, true);
         }
 
-        private List<String> protocols(final Settings settings) {
+        private List<String> protocols(final Settings settings, final SslProvider provider) {
             final var allowedProtocols = settings.getAsList(ENABLED_PROTOCOLS, List.of(ALLOWED_SSL_PROTOCOLS));
+            if (provider == SslProvider.OPENSSL || provider == SslProvider.OPENSSL_REFCNT) {
+                final boolean isHttp = certType == CertType.HTTP;
+                final String[] supportedProtocols;
+                if (OpenSsl.version() > OPENSSL_1_1_1_BETA_9) {
+                    supportedProtocols = isHttp ? ALLOWED_OPENSSL_HTTP_PROTOCOLS : ALLOWED_OPENSSL_TRANSPORT_PROTOCOLS;
+                } else {
+                    supportedProtocols = isHttp
+                        ? ALLOWED_OPENSSL_HTTP_PROTOCOLS_PRIOR_OPENSSL_1_1_1_BETA_9
+                        : ALLOWED_OPENSSL_TRANSPORT_PROTOCOLS_PRIOR_OPENSSL_1_1_1_BETA_9;
+                }
+                return openSslProtocols(allowedProtocols, supportedProtocols);
+            }
             return jdkProtocols(allowedProtocols);
         }
 
@@ -134,15 +169,34 @@ public class SslParameters {
             }
         }
 
-        private List<String> ciphers(final Settings settings) {
+        private List<String> openSslProtocols(final List<String> allowedSslProtocols, final String... supportedProtocols) {
+            LOGGER.debug("OpenSSL supports the following {} protocols {}", supportedProtocols.length, supportedProtocols);
+            return Stream.of(supportedProtocols).filter(allowedSslProtocols::contains).collect(Collectors.toList());
+        }
+
+        private List<String> ciphers(final Settings settings, final SslProvider provider) {
             final var allowed = settings.getAsList(ENABLED_CIPHERS, List.of(ALLOWED_SSL_CIPHERS));
             final Stream<String> allowedCiphers;
-            try {
-                final var supportedCiphers = SSLContext.getDefault().getDefaultSSLParameters().getCipherSuites();
-                LOGGER.debug("JVM supports the following {} ciphers {}", supportedCiphers.length, supportedCiphers);
-                allowedCiphers = Stream.of(supportedCiphers).filter(allowed::contains);
-            } catch (final NoSuchAlgorithmException e) {
-                throw new OpenSearchException("Unable to determine ciphers protocols", e);
+            if (provider == SslProvider.OPENSSL || provider == SslProvider.OPENSSL_REFCNT) {
+                LOGGER.debug(
+                    "OpenSSL {} supports the following ciphers (java-style) {}",
+                    OpenSsl.versionString(),
+                    OpenSsl.availableJavaCipherSuites()
+                );
+                LOGGER.debug(
+                    "OpenSSL {} supports the following ciphers (openssl-style) {}",
+                    OpenSsl.versionString(),
+                    OpenSsl.availableOpenSslCipherSuites()
+                );
+                allowedCiphers = allowed.stream().filter(OpenSsl::isCipherSuiteAvailable);
+            } else {
+                try {
+                    final var supportedCiphers = SSLContext.getDefault().getDefaultSSLParameters().getCipherSuites();
+                    LOGGER.debug("JVM supports the following {} ciphers {}", supportedCiphers.length, supportedCiphers);
+                    allowedCiphers = Stream.of(supportedCiphers).filter(allowed::contains);
+                } catch (final NoSuchAlgorithmException e) {
+                    throw new OpenSearchException("Unable to determine ciphers protocols", e);
+                }
             }
             return allowedCiphers.sorted(String::compareTo).collect(Collectors.toList());
         }
@@ -161,8 +215,8 @@ public class SslParameters {
             final var sslParameters = new SslParameters(
                 provider,
                 clientAuth,
-                protocols(sslConfigSettings),
-                ciphers(sslConfigSettings),
+                protocols(sslConfigSettings, provider),
+                ciphers(sslConfigSettings, provider),
                 validateCertDNsOnReload(sslConfigSettings)
             );
             if (sslParameters.allowedProtocols().isEmpty()) {

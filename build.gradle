@@ -745,6 +745,14 @@ dependencies {
 
     compileOnly 'com.google.code.findbugs:jsr305:3.0.2'
 
+    // Native OpenSSL support via Netty tcnative (openssl-dynamic).
+    // Pre-built jars from Maven Central link against OpenSSL 1.1.x (libssl.so.1.1).
+    // For OpenSSL 3.x systems, build netty-tcnative from source — see INSTALL.md.
+    if (osdetector.classifier in ["osx-x86_64", "osx-aarch_64", "linux-x86_64", "linux-aarch_64", "windows-x86_64"]) {
+        implementation "io.netty:netty-tcnative-classes:2.0.77.Final"
+        runtimeOnly    "io.netty:netty-tcnative:2.0.77.Final:${osdetector.classifier}"
+    }
+
     runtimeOnly libs.bundles.archivers
 
     runtimeOnly 'org.slf4j:slf4j-api:1.7.36'
